@@ -2,8 +2,8 @@ package main
 
 import (
 	"fmt"
-	"net"
 	"os"
+	"time"
 	"strings"
 	"crypto/tls"
 	"gopkg.in/mgo.v2"
@@ -30,10 +30,14 @@ func connectDB() *mgo.Session {
 		os.Exit(1)
 	}
 
-	dialInfo.DialServer = func(addr *mgo.ServerAddr) (net.Conn, error) {
-		conn, err := tls.Dial("tcp", addr.String(), tlsConfig)
-		return conn, err
-	}
+	// dialInfo.DialServer = func(addr *mgo.ServerAddr) (net.Conn, error) {
+	// 	conn, err := tls.Dial("tcp", addr.String(), tlsConfig)
+	// 	return conn, err
+	// }
+
+//	dialInfo.FailFast = true
+	maxWait := time.Duration(5 * time.Second)
+	dialInfo.Timeout = maxWait
 
 	session, err := mgo.DialWithInfo(dialInfo)
 	if err != nil {
