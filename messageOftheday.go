@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net/http"
 	"log"
 	"fmt"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"crypto/tls"
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
+	"github.com/gorilla/mux"
 )
 
 type WeekPlan struct {
@@ -23,6 +25,8 @@ var MyTestEvent = WeekPlan{_id: "10", Userid: "testEvent", Eventid: "testEvent1"
 
 const DBName = "mybluemarvin"
 const CollectionName = "weekplan"
+
+type handler func(w http.ResponseWriter, r *http.Request, db *mgo.Database)
 
 func writeToDb(session *mgo.Session, eventinWeek WeekPlan) {
 	c := session.DB(DBName).C(CollectionName)
@@ -48,6 +52,7 @@ func GetMessageOfUserForEvent(session *mgo.Session, user string, eventId string)
 
 	return results[0]
 }
+
 func connectDB() *mgo.Session {
 	uri := os.Getenv("MONGODB_URL")
 	if uri == "" {
@@ -86,8 +91,26 @@ func connectDB() *mgo.Session {
 	return session
 }
 
+func (h handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+    s := session.Clone()
+    defer s.Close()
+
+    h(w, r, s.DB(DBName))
+}
+
+func GetMessage(w http.ResponseWriter, r *http.Request, db *mgo.Database) {
+	params := mux.Vars(r)
+	userid := params["userid"]
+	eventid := params["eventid"]
+
+	weekplan := GetMessageOfUserForEvent(db.Session, userid, eventid)
+	fmt.Fprintf(w, "%s", weekplan.Data)
+}
+
+var session *mgo.Session
+
 func main() {
-	session := connectDB()
+	session = connectDB()
 
 	defer session.Close()
 
@@ -96,4 +119,17 @@ func main() {
 	dayPlan := GetMessageOfUserForEvent(session, "isis", "welcome")
 	
 	fmt.Println(dayPlan.Data)
+	
+	router := mux.NewRouter()
+	router.Handle("/message/{userid}/{eventid}", handler(GetMessage))
+
+	srv := &http.Server{
+        Handler:      router,
+        Addr:         "127.0.0.1:8080",
+        // Good practice: enforce timeouts for servers you create!
+        WriteTimeout: 15 * time.Second,
+        ReadTimeout:  15 * time.Second,
+    }
+
+    log.Fatal(srv.ListenAndServe())
 }
