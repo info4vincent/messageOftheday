@@ -1,24 +1,26 @@
 package main
 
 import (
-	"net/http"
-	"log"
-	"fmt"
-	"os"
-	"time"
-	"strings"
 	"crypto/tls"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/gorilla/mux"
+	zmq "github.com/pebbe/zmq4"
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
-	"github.com/gorilla/mux"
 )
 
 type WeekPlan struct {
-	_id	        string
-	Userid      string
-	Eventid     string
-	Action      string
-	Data 		string
+	_id     string
+	Userid  string
+	Eventid string
+	Action  string
+	Data    string
 }
 
 var MyTestEvent = WeekPlan{_id: "10", Userid: "testEvent", Eventid: "testEvent1", Data: "test the data"}
@@ -42,12 +44,21 @@ func GetMessageOfUserForEvent(session *mgo.Session, user string, eventId string)
 
 	var results []WeekPlan
 	err := c.Find(nil).All(&results)
-	err =c.Find(bson.M{"userid": user, "eventid": eventId}).All(&results)
+	err = c.Find(bson.M{"userid": user, "eventid": eventId}).All(&results)
 
-	if (err == nil) {
-		return results[0]
-	} else if (err != nil ) {
-		log.Fatal(err)
+	log.Println("aantal results:", len(results))
+	// actionUri := fmt.Sprintf("Say:Hoi, ik heb geen message gevonden voor user:%v en eventId", user, eventId)
+	if err == nil {
+		if len(results) > 0 {
+			log.Println("Messagefound found returning details now.")
+			return results[0]
+		} else {
+			log.Println("Could not find the user or event..")
+			return WeekPlan{user, user, eventId, "Say", "user en of event niet gevonden."}
+		}
+	} else if err != nil {
+		log.Println("Could not find user or event")
+		return WeekPlan{user, user, eventId, "Say", "user en of event niet gevonden."}
 	}
 
 	return results[0]
@@ -92,10 +103,10 @@ func connectDB() *mgo.Session {
 }
 
 func (h handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-    s := session.Clone()
-    defer s.Close()
+	s := session.Clone()
+	defer s.Close()
 
-    h(w, r, s.DB(DBName))
+	h(w, r, s.DB(DBName))
 }
 
 func GetMessage(w http.ResponseWriter, r *http.Request, db *mgo.Database) {
@@ -114,22 +125,91 @@ func main() {
 
 	defer session.Close()
 
-	writeToDb(session, MyTestEvent)
+	// writeToDb(session, MyTestEvent)
 
-	dayPlan := GetMessageOfUserForEvent(session, "isis", "welcome")
-	
+	dayPlan := GetMessageOfUserForEvent(session, "ruben", "welcome")
+
 	fmt.Println(dayPlan.Data)
-	
-	router := mux.NewRouter()
-	router.Handle("/message/{userid}/{eventid}", handler(GetMessage))
 
-	srv := &http.Server{
-        Handler:      router,
-        Addr:         "127.0.0.1:8080",
-        // Good practice: enforce timeouts for servers you create!
-        WriteTimeout: 15 * time.Second,
-        ReadTimeout:  15 * time.Second,
-    }
+	fmt.Println("starting messageOftheday....")
+	fmt.Println("Connecting to eventsource server...")
+	requester, err := zmq.NewSocket(zmq.REQ)
+	if err != nil {
+		log.Fatal(err)
+	}
 
-    log.Fatal(srv.ListenAndServe())
+	defer requester.Close()
+	err = requester.Connect("tcp://localhost:5555")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println("Client bind *:5555 succesful")
+
+	myint, error := requester.Send("zmqmsgoftheday available..", 0)
+	if error != nil {
+		log.Println("Not send any message", error)
+	} else {
+		log.Println(myint)
+	}
+
+	event, error := requester.Recv(0)
+
+	if error != nil {
+		log.Println("Not received any..")
+	} else {
+		log.Println(event)
+	}
+
+	//  Socket to talk to server
+	fmt.Println("Collecting updates from weather server...")
+	subscriber, _ := zmq.NewSocket(zmq.SUB)
+	defer subscriber.Close()
+	subscriber.Connect("tcp://localhost:5556")
+
+	//  Subscribe to Everything which a command to messageOftheday things..
+	filter := "Messageoftheday:"
+	subscriber.SetSubscribe(filter)
+
+	// Wait for messages
+	fmt.Println("MessageoftheDay is waiting for weather server...")
+	for {
+		event, error := subscriber.Recv(zmq.DONTWAIT)
+
+		if error != nil {
+			continue
+		}
+
+		eventData := strings.TrimPrefix(event, "Messageoftheday:")
+		eventDataFields := strings.Fields(eventData)
+
+		msgoftheDayData := GetMessageOfUserForEvent(session, eventDataFields[0], eventDataFields[1])
+		// send reply back to client
+		reply := fmt.Sprintf("%v:%v", msgoftheDayData.Action, msgoftheDayData.Data)
+		log.Println("Sending:", reply)
+		_, err = requester.Send(reply, 0)
+		if err != nil {
+			log.Println("Error while sending..", err)
+		}
+		_, err = requester.Recv(0)
+		if err != nil {
+			log.Println("Error while receiving..", err)
+		}
+		log.Println("publishing:", reply)
+		subscriber.Send(reply, 0)
+		fmt.Println("MessageoftheDay is waiting for weather server...")
+	}
+
+	// router := mux.NewRouter()
+	// router.Handle("/message/{userid}/{eventid}", handler(GetMessage))
+
+	// srv := &http.Server{
+	// 	Handler: router,
+	// 	Addr:    "127.0.0.1:8080",
+	// 	// Good practice: enforce timeouts for servers you create!
+	// 	WriteTimeout: 15 * time.Second,
+	// 	ReadTimeout:  15 * time.Second,
+	// }
+
+	// log.Fatal(srv.ListenAndServe())
 }
