@@ -183,14 +183,14 @@ func main() {
 		
 		eventData := strings.TrimPrefix(event, "Messageoftheday:")
 		eventDataFields := strings.Fields(eventData)
-		eventIDField := eventDataFields[0]
+		userID := eventDataFields[0]
 	
 		dayOfTheWeek := time.Now().Weekday().String()
 		fmt.Println("Day of the week", dayOfTheWeek)
 
-		eventID := strings.Replace(eventIDField, "{dayoftheweek}", dayOfTheWeek, -1)
+		eventID := strings.Replace(eventDataFields[1], "{dayoftheweek}", dayOfTheWeek, -1)
 		
-		msgoftheDayData := GetMessageOfUserForEvent(session, eventID, eventDataFields[1])
+		msgoftheDayData := GetMessageOfUserForEvent(session, userID, eventID )
 		// send reply back to client
 		reply := fmt.Sprintf("%v:%v", msgoftheDayData.Action, msgoftheDayData.Data)
 		log.Println("Sending:", reply)
