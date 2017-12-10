@@ -179,11 +179,18 @@ func main() {
 		if error != nil {
 			continue
 		}
-
+		
+		
 		eventData := strings.TrimPrefix(event, "Messageoftheday:")
 		eventDataFields := strings.Fields(eventData)
+		eventIDField := eventDataFields[0]
+	
+		dayOfTheWeek := time.Now().Weekday().String()
+		fmt.Println("Day of the week", dayOfTheWeek)
 
-		msgoftheDayData := GetMessageOfUserForEvent(session, eventDataFields[0], eventDataFields[1])
+		eventID := strings.Replace(eventIDField, "{dayoftheweek}", dayOfTheWeek, -1)
+		
+		msgoftheDayData := GetMessageOfUserForEvent(session, eventID, eventDataFields[1])
 		// send reply back to client
 		reply := fmt.Sprintf("%v:%v", msgoftheDayData.Action, msgoftheDayData.Data)
 		log.Println("Sending:", reply)
